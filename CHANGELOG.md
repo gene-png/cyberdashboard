@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-04-29
+
+### Added
+- HTMX auto-save: per-activity `change` trigger POSTs to `/htmx/assessments/{id}/response/{activity_id}`; returns inline "Saved" indicator with CSS fade-out; no page reload required
+- `<noscript>` fallback form on pillar page for no-JS environments
+- Rate limiting via Flask-Limiter: 5 POST attempts / 15 min on `/login`; 10 / min on finding regenerate endpoint
+- SharePoint service (`sharepoint_service.py`): Graph API client-credentials auth, folder creation, file upload, `upload_assessment_outputs`, `backup_database`
+- Finalize route now builds both Excel files and uploads to SharePoint (no-op with warning if credentials not configured)
+- Response snapshot JSON and audit CSVs uploaded alongside Excel on finalization
+- `scripts/backup_db.py`: nightly DB backup to SharePoint `/Backups/{date}/`, prunes backups older than 30 days
+- Admin session countdown timer in navbar (warns at 3 min remaining, shows "expired" at 0)
+- `RATELIMIT_ENABLED = False` in TestingConfig to prevent rate-limiter interference with tests
+- 25 new tests (test_htmx, test_sharepoint_service) — 102 total passing
+
 ## [0.2.0] — 2026-04-29
 
 ### Added
