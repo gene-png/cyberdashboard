@@ -1,0 +1,39 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+REPO_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
+
+
+class Config:
+    SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-in-production")
+    SQLALCHEMY_DATABASE_URI = os.environ.get(
+        "DATABASE_URL", f"sqlite:///{os.path.join(REPO_ROOT, 'instance', 'assessments.db')}"
+    )
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    WTF_CSRF_ENABLED = True
+    WTF_CSRF_TIME_LIMIT = 3600
+
+    ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
+    ADMIN_SESSION_TIMEOUT = 15 * 60  # 15 minutes
+
+    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+    ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+
+    AZURE_TENANT_ID = os.environ.get("AZURE_TENANT_ID", "")
+    AZURE_CLIENT_ID = os.environ.get("AZURE_CLIENT_ID", "")
+    AZURE_CLIENT_SECRET = os.environ.get("AZURE_CLIENT_SECRET", "")
+    SHAREPOINT_SITE_ID = os.environ.get("SHAREPOINT_SITE_ID", "")
+    SHAREPOINT_DRIVE_ID = os.environ.get("SHAREPOINT_DRIVE_ID", "")
+
+    FRAMEWORKS_DIR = os.path.join(REPO_ROOT, "data", "frameworks")
+
+
+class TestingConfig(Config):
+    TESTING = True
+    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+    WTF_CSRF_ENABLED = False
+    SECRET_KEY = "test-secret"
+    RATELIMIT_ENABLED = False
