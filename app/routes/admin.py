@@ -1,5 +1,6 @@
 import io
 import json
+import os
 from datetime import datetime, timezone
 from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, send_file, current_app
 from flask_login import login_required, current_user
@@ -9,11 +10,16 @@ from ..models import (
     Assessment, AdminScore, AuditLog, GapFinding, AICallLog, SensitiveTerm, User,
     ToolInventory, ToolActivityMapping, MappingSuggestionsLog, MappingChange,
 )
+from ..models.mitre_technique import MitreTechnique
+from ..models.attack_coverage_run import AttackCoverageRun
+from ..models.coverage_report import CoverageReport
 from ..services.framework_loader import load_framework
 from ..services.excel_service import build_customer_excel, build_consultant_excel
 from ..services.report_generator import generate_findings, regenerate_finding
 from ..services.sharepoint_service import get_client_from_config, upload_assessment_outputs
 from ..services.mapping_suggester import suggest_mappings, build_mapping_prompt
+from ..services.attack_mapper import get_tool_fingerprint, map_tool_to_techniques
+from ..services.attack_coverage_excel import build_attack_coverage_excel, compute_coverage_matrix
 from .auth import is_admin_unlocked
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -627,3 +633,188 @@ def tool_mapping_finalize(assessment_id, tool_id):
     db.session.commit()
     flash(f"Mappings finalized. {len(checked_ids)} activities mapped for {tool.name}.", "success")
     return redirect(url_for("admin.tool_mapping", assessment_id=assessment_id, tool_id=tool_id))
+
+
+# ---------------------------------------------------------------------------
+# ATT&CK Coverage Report
+# ---------------------------------------------------------------------------
+
+@admin_bp.route("/assessments/<assessment_id>/attack-coverage")
+@login_required
+def attack_coverage(assessment_id):
+    redir = _require_admin()
+    if redir:
+        return redir
+    assessment = db.session.get(Assessment, assessment_id)
+    if not assessment:
+        abort(404)
+
+    tools = assessment.tool_inventory
+    pending_tools = [t for t in tools if t.mapping_status == "pending_review"]
+    active_tools = [t for t in tools if t.mapping_status == "active"]
+    has_techniques = MitreTechnique.query.limit(1).count() > 0
+
+    past_reports = (
+        CoverageReport.query
+        .filter_by(assessment_id=assessment_id)
+        .order_by(CoverageReport.generated_at.desc())
+        .all()
+    )
+
+    recent_report = None
+    if past_reports:
+        age = datetime.now(timezone.utc) - past_reports[0].generated_at.replace(tzinfo=timezone.utc)
+        if age.total_seconds() < 86400:  # 24h
+            recent_report = past_reports[0]
+
+    return render_template(
+        "admin/attack_coverage.html",
+        assessment=assessment,
+        pending_tools=pending_tools,
+        active_tools=active_tools,
+        past_reports=past_reports,
+        recent_report=recent_report,
+        has_techniques=has_techniques,
+        admin_unlocked=True,
+    )
+
+
+@admin_bp.route("/assessments/<assessment_id>/attack-coverage/generate", methods=["POST"])
+@login_required
+def attack_coverage_generate(assessment_id):
+    redir = _require_admin()
+    if redir:
+        return redir
+    assessment = db.session.get(Assessment, assessment_id)
+    if not assessment:
+        abort(404)
+
+    active_tools = [t for t in assessment.tool_inventory if t.mapping_status == "active"]
+    excluded_names = [t.name for t in assessment.tool_inventory if t.mapping_status == "pending_review"]
+
+    if not active_tools:
+        flash("No tools with finalized mappings. Map and finalize tools before generating the report.", "warning")
+        return redirect(url_for("admin.attack_coverage", assessment_id=assessment_id))
+
+    techniques = MitreTechnique.query.all()
+    if not techniques:
+        flash(
+            "MITRE ATT&CK technique database is empty. "
+            "Run 'python scripts/seed_mitre.py' to load techniques first.",
+            "warning",
+        )
+        return redirect(url_for("admin.attack_coverage", assessment_id=assessment_id))
+
+    api_key = current_app.config.get("ANTHROPIC_API_KEY", "")
+    model = current_app.config.get("ATTACK_MODEL", current_app.config.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"))
+
+    coverage_data = []
+    errors = []
+
+    for tool in active_tools:
+        activity_ids = [m.activity_id for m in tool.active_mappings]
+        fingerprint = get_tool_fingerprint(tool, activity_ids)
+
+        # Check cache
+        cached = (
+            AttackCoverageRun.query
+            .filter_by(tool_id=tool.id, tool_fingerprint=fingerprint)
+            .order_by(AttackCoverageRun.created_at.desc())
+            .first()
+        )
+
+        results, error = map_tool_to_techniques(
+            tool, activity_ids, techniques, api_key, model, cached_run=cached
+        )
+
+        if error:
+            errors.append(f"{tool.name}: {error}")
+            if not api_key:
+                break  # No point continuing if API key is missing
+        else:
+            # Cache new result if it wasn't a cache hit
+            if not (cached and cached.tool_fingerprint == fingerprint):
+                run = AttackCoverageRun(
+                    assessment_id=assessment_id,
+                    tool_id=tool.id,
+                    tool_fingerprint=fingerprint,
+                    response_payload=json.dumps(results),
+                    model_used=model,
+                )
+                db.session.add(run)
+                db.session.commit()
+
+        coverage_data.append({"tool": tool, "activity_ids": activity_ids, "results": results})
+
+    if errors and not any(d["results"] for d in coverage_data):
+        flash(f"Report generation failed: {'; '.join(errors)}", "danger")
+        return redirect(url_for("admin.attack_coverage", assessment_id=assessment_id))
+
+    if errors:
+        flash(f"Partial report — some tools failed: {'; '.join(errors)}", "warning")
+
+    # Build Excel
+    now = datetime.now(timezone.utc)
+    xlsx_bytes = build_attack_coverage_excel(
+        coverage_data=coverage_data,
+        techniques=techniques,
+        generated_at=now,
+        model_used=model,
+        excluded_tool_names=excluded_names,
+    )
+
+    # Save to REPORTS_DIR
+    reports_dir = current_app.config.get("REPORTS_DIR", os.path.join(current_app.instance_path, "reports"))
+    os.makedirs(reports_dir, exist_ok=True)
+    timestamp_str = now.strftime("%Y%m%d_%H%M%S")
+    filename = f"attack_coverage_{assessment_id[:8]}_{timestamp_str}.xlsx"
+    file_path = os.path.join(reports_dir, filename)
+    with open(file_path, "wb") as fh:
+        fh.write(xlsx_bytes)
+
+    # Compute covered count from matrix
+    matrix = compute_coverage_matrix(coverage_data, techniques)
+    covered_count = sum(1 for v in matrix.values() if v["gap_status"] != "None")
+
+    report = CoverageReport(
+        assessment_id=assessment_id,
+        generated_by=current_user.id,
+        generated_at=now,
+        tool_count=len(active_tools),
+        technique_count=len(techniques),
+        covered_count=covered_count,
+        file_path=file_path,
+        model_used=model,
+    )
+    db.session.add(report)
+    db.session.commit()
+
+    flash(
+        f"ATT&CK Coverage Report generated: {len(active_tools)} tools, "
+        f"{covered_count}/{len(techniques)} techniques covered.",
+        "success",
+    )
+    return redirect(url_for("admin.attack_coverage", assessment_id=assessment_id))
+
+
+@admin_bp.route("/assessments/<assessment_id>/attack-coverage/<report_id>/download")
+@login_required
+def attack_coverage_download(assessment_id, report_id):
+    redir = _require_admin()
+    if redir:
+        return redir
+    report = db.session.get(CoverageReport, report_id)
+    if not report or report.assessment_id != assessment_id:
+        abort(404)
+
+    if not os.path.exists(report.file_path):
+        flash("Report file not found on disk. It may have been removed.", "danger")
+        return redirect(url_for("admin.attack_coverage", assessment_id=assessment_id))
+
+    filename = f"attack_coverage_{report.generated_at.strftime('%Y-%m-%d')}.xlsx"
+    return send_file(
+        report.file_path,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
