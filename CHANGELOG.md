@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-04-29
+
+### Added
+- CISA ZT framework support: end-to-end verified through all routes (pillar page, HTMX auto-save, Excel export, report generator)
+- `_compute_pillar_stats()` now uses framework-agnostic dict keys (`gap_large`, `gap_small`) and generic column headers ("Large Gap", "Small Gap", "Gap %") — works for both DoD ZT and CISA ZT
+- Admin audit log view: `GET /admin/assessments/{id}/audit` — shows full audit log table, newest-first, with username resolution
+- Sensitive terms management UI: `GET/POST /admin/assessments/{id}/terms` — admin can add user-defined terms (mapped to `[CUSTOM_N]` tokens) and deactivate existing terms; sanitizes HTML input; writes audit log on every change
+- Links to Audit Log and Sensitive Terms from admin review page header
+- 28 new tests (test_cisa_framework, test_admin_views) — 130 total passing
+
 ## [0.3.0] — 2026-04-29
 
 ### Added

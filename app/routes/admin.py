@@ -3,8 +3,9 @@ import json
 from datetime import datetime, timezone
 from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, send_file, current_app
 from flask_login import login_required, current_user
+import bleach
 from ..extensions import db, limiter
-from ..models import Assessment, AdminScore, AuditLog, GapFinding, AICallLog
+from ..models import Assessment, AdminScore, AuditLog, GapFinding, AICallLog, SensitiveTerm, User
 from ..services.framework_loader import load_framework
 from ..services.excel_service import build_customer_excel, build_consultant_excel
 from ..services.report_generator import generate_findings, regenerate_finding
@@ -313,3 +314,108 @@ def regenerate(assessment_id, activity_id):
         flash(f"Regeneration failed: {e}", "danger")
 
     return redirect(url_for("admin.findings", assessment_id=assessment_id))
+
+
+@admin_bp.route("/assessments/<assessment_id>/audit")
+@login_required
+def audit_log(assessment_id):
+    redir = _require_admin()
+    if redir:
+        return redir
+    assessment = db.session.get(Assessment, assessment_id)
+    if not assessment:
+        abort(404)
+
+    logs = (
+        AuditLog.query
+        .filter_by(assessment_id=assessment_id)
+        .order_by(AuditLog.timestamp.desc())
+        .all()
+    )
+    user_map = {u.id: u.username for u in User.query.all()}
+    return render_template(
+        "admin/audit.html",
+        assessment=assessment,
+        logs=logs,
+        user_map=user_map,
+        admin_unlocked=True,
+    )
+
+
+@admin_bp.route("/assessments/<assessment_id>/terms", methods=["GET", "POST"])
+@login_required
+def sensitive_terms(assessment_id):
+    redir = _require_admin()
+    if redir:
+        return redir
+    assessment = db.session.get(Assessment, assessment_id)
+    if not assessment:
+        abort(404)
+
+    if request.method == "POST":
+        action = request.form.get("action", "add")
+
+        if action == "add":
+            raw_term = request.form.get("term", "").strip()
+            term = bleach.clean(raw_term, tags=[], strip=True)
+            if term:
+                # Generate a sequential token name
+                existing_user_count = SensitiveTerm.query.filter_by(
+                    assessment_id=assessment_id, source="user_added"
+                ).count()
+                token = f"[CUSTOM_{existing_user_count + 1}]"
+                st = SensitiveTerm(
+                    assessment_id=assessment_id,
+                    term=term,
+                    replacement_token=token,
+                    source="user_added",
+                    is_active=True,
+                )
+                db.session.add(st)
+                log = AuditLog(
+                    assessment_id=assessment_id,
+                    user_id=current_user.id,
+                    action="add_sensitive_term",
+                    target_type="sensitive_term",
+                    target_id=token,
+                    after_value=term,
+                )
+                db.session.add(log)
+                db.session.commit()
+                flash(f"Term added and mapped to {token}.", "success")
+            else:
+                flash("Term cannot be empty.", "warning")
+
+        elif action == "deactivate":
+            term_id = request.form.get("term_id", "").strip()
+            st = db.session.get(SensitiveTerm, term_id)
+            if st and st.assessment_id == assessment_id:
+                st.is_active = False
+                log = AuditLog(
+                    assessment_id=assessment_id,
+                    user_id=current_user.id,
+                    action="deactivate_sensitive_term",
+                    target_type="sensitive_term",
+                    target_id=st.replacement_token,
+                    before_value=st.term,
+                )
+                db.session.add(log)
+                db.session.commit()
+                flash(f"Term '{st.term}' deactivated.", "success")
+            else:
+                flash("Term not found.", "warning")
+
+        return redirect(url_for("admin.sensitive_terms", assessment_id=assessment_id))
+
+    terms = (
+        SensitiveTerm.query
+        .filter_by(assessment_id=assessment_id)
+        .order_by(SensitiveTerm.source, SensitiveTerm.term)
+        .all()
+    )
+    return render_template(
+        "admin/terms.html",
+        assessment=assessment,
+        terms=terms,
+        admin_unlocked=True,
+    )

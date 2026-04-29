@@ -82,8 +82,8 @@ def _compute_pillar_stats(assessment: Assessment, framework: dict) -> list[dict]
             "pillar_name": pillar["name"],
             "total": total,
             "met": met,
-            "partial": partial,
-            "not_met": not_met,
+            "gap_small": partial,   # gap of exactly 1 maturity step
+            "gap_large": not_met,   # gap of 2+ maturity steps
             "current_score": current_score,
             "target_score": target_score,
             "gap": round(target_score - current_score, 1),
@@ -117,7 +117,7 @@ def build_customer_excel(assessment: Assessment) -> bytes:
 
     ws.append([])
     header_row = ws.max_row + 1
-    headers = ["Pillar", "Current Score", "Target Score", "Gap", "Not Met", "Partial", "Met"]
+    headers = ["Pillar", "Current Score", "Target Score", "Gap %", "Large Gap", "Small Gap", "Met"]
     ws.append(headers)
     for col, h in enumerate(headers, 1):
         cell = ws.cell(row=header_row, column=col)
@@ -132,8 +132,8 @@ def build_customer_excel(assessment: Assessment) -> bytes:
             stat["current_score"],
             stat["target_score"],
             stat["gap"],
-            stat["not_met"],
-            stat["partial"],
+            stat["gap_large"],
+            stat["gap_small"],
             stat["met"],
         ]
         ws.append(row)
