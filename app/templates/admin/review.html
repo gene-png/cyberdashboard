@@ -5,6 +5,11 @@
   <h1>Admin Review: {{ assessment.customer_org }}</h1>
   <div class="action-group">
     <span class="badge badge-{{ assessment.status }}">{{ assessment.status | replace('_', ' ') | title }}</span>
+    <a href="{{ url_for('admin.findings', assessment_id=assessment.id) }}" class="btn btn-sm">AI Findings</a>
+    <form method="POST" action="{{ url_for('admin.generate', assessment_id=assessment.id) }}" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <button type="submit" class="btn btn-sm btn-outline">Generate AI Findings</button>
+    </form>
     <a href="{{ url_for('admin.export_customer', assessment_id=assessment.id) }}" class="btn btn-sm">Export Customer Report</a>
     <a href="{{ url_for('admin.export_consultant', assessment_id=assessment.id) }}" class="btn btn-sm">Export Consultant Report</a>
     {% if assessment.status != 'finalized' %}
