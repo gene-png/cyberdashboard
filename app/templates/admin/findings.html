@@ -1,6 +1,37 @@
 {% extends "base.html" %}
 {% block title %}AI Findings — {{ assessment.customer_org }}{% endblock %}
+
 {% block content %}
+<!-- AI generation progress overlay -->
+<div id="ai-progress-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);
+     z-index:9000;align-items:center;justify-content:center;flex-direction:column;">
+  <div style="background:#fff;border-radius:8px;padding:2rem 2.5rem;text-align:center;max-width:320px;">
+    <div style="font-size:1.1rem;font-weight:600;margin-bottom:0.5rem;">Generating AI Findings…</div>
+    <div style="color:#64748b;font-size:13px;">Elapsed: <span id="ai-elapsed">0</span>s</div>
+    <div style="color:#64748b;font-size:12px;margin-top:0.5rem;">This may take up to a minute.</div>
+  </div>
+</div>
+<script>
+(function () {
+  var overlay = document.getElementById('ai-progress-overlay');
+  var elapsed = document.getElementById('ai-elapsed');
+  var timer;
+
+  function startOverlay() {
+    overlay.style.display = 'flex';
+    var seconds = 0;
+    elapsed.textContent = '0';
+    timer = setInterval(function () { elapsed.textContent = ++seconds; }, 1000);
+  }
+
+  document.querySelectorAll('.ai-generate-btn').forEach(function (btn) {
+    btn.closest('form').addEventListener('submit', function () {
+      btn.disabled = true;
+      startOverlay();
+    });
+  });
+})();
+</script>
 <div class="page-header">
   <div>
     <h1>AI Findings: {{ assessment.customer_org }}</h1>
@@ -10,7 +41,7 @@
     <a href="{{ url_for('admin.review', assessment_id=assessment.id) }}" class="btn btn-outline">Back to Review</a>
     <form method="POST" action="{{ url_for('admin.generate', assessment_id=assessment.id) }}" style="display:inline">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-      <button type="submit" class="btn btn-primary"
+      <button type="submit" class="btn btn-primary ai-generate-btn"
               onclick="return confirm('Regenerate ALL findings? This will overwrite existing guidance.')">
         Regenerate All Findings
       </button>
@@ -23,7 +54,7 @@
   <p>No findings yet.</p>
   <form method="POST" action="{{ url_for('admin.generate', assessment_id=assessment.id) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-    <button type="submit" class="btn btn-primary">Generate AI Findings</button>
+    <button type="submit" class="btn btn-primary ai-generate-btn">Generate AI Findings</button>
   </form>
   <p style="margin-top:12px;color:#64748b;font-size:13px;">
     This will call the Anthropic API for each gap in the assessment.

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, send_file
 from flask_login import login_required, current_user
 from ..extensions import db
-from ..models import Assessment, Response, ToolInventory, AuditLog, GapFinding
+from ..models import Assessment, Response, ToolInventory, AuditLog, GapFinding, SensitiveTerm
 from ..services.framework_loader import load_framework
 from ..services.excel_service import build_customer_excel
 from .auth import is_admin_unlocked
@@ -46,13 +46,28 @@ def _log_audit(assessment_id, action, target_type, target_id, before=None, after
 @login_required
 def workspace(assessment_id):
     assessment = _get_assessment_or_403(assessment_id)
+
+    # Resume to last-saved step unless the user explicitly wants the overview
+    if assessment.current_step and not request.args.get("overview"):
+        step = assessment.current_step
+        if step.startswith("pillar_"):
+            pillar_id = step[len("pillar_"):]
+            return redirect(url_for("assessment.pillar", assessment_id=assessment_id, pillar_id=pillar_id))
+
     framework = load_framework(assessment.framework)
     responses = {r.activity_id: r for r in assessment.responses}
+    user_terms = (
+        SensitiveTerm.query
+        .filter_by(assessment_id=assessment_id, source="user_added", is_active=True)
+        .order_by(SensitiveTerm.term)
+        .all()
+    )
     return render_template(
         "assessment/workspace.html",
         assessment=assessment,
         framework=framework,
         responses=responses,
+        user_terms=user_terms,
         admin_unlocked=is_admin_unlocked(),
     )
 
@@ -200,6 +215,49 @@ def submit(assessment_id):
         answered=answered,
         admin_unlocked=is_admin_unlocked(),
     )
+
+
+@assessment_bp.route("/assessments/<assessment_id>/terms", methods=["POST"])
+@login_required
+def add_sensitive_terms(assessment_id):
+    assessment = _get_assessment_or_403(assessment_id)
+    if not assessment.is_editable_by_customer and not is_admin_unlocked():
+        flash("Assessment is locked.", "warning")
+        return redirect(url_for("assessment.workspace", assessment_id=assessment_id, overview=1))
+
+    raw_block = request.form.get("terms", "")
+    added = 0
+    for raw in raw_block.splitlines():
+        term = _sanitize(raw).strip()
+        if not term:
+            continue
+        already = SensitiveTerm.query.filter_by(
+            assessment_id=assessment_id, term=term, is_active=True
+        ).first()
+        if already:
+            continue
+        count = SensitiveTerm.query.filter_by(
+            assessment_id=assessment_id, source="user_added"
+        ).count()
+        token = f"[CUSTOM_{count + 1}]"
+        st = SensitiveTerm(
+            assessment_id=assessment_id,
+            term=term,
+            replacement_token=token,
+            source="user_added",
+            is_active=True,
+        )
+        db.session.add(st)
+        _log_audit(assessment_id, "add_sensitive_term", "sensitive_term", token, after=term)
+        added += 1
+
+    if added:
+        db.session.commit()
+        flash(f"{added} sensitive term(s) added.", "success")
+    else:
+        flash("No new terms to add.", "info")
+
+    return redirect(url_for("assessment.workspace", assessment_id=assessment_id, overview=1))
 
 
 @assessment_bp.route("/assessments/<assessment_id>/report")

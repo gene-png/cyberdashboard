@@ -38,6 +38,13 @@ class Config:
     # Set to True to force HTTP → HTTPS redirect (via X-Forwarded-Proto header)
     FORCE_HTTPS = os.environ.get("FORCE_HTTPS", "false").lower() == "true"
 
+    # Tool-to-activity mapping analysis thresholds
+    REDUNDANCY_THRESHOLD = int(os.environ.get("REDUNDANCY_THRESHOLD", "3"))
+    TOOL_MIN_ACTIVITIES = int(os.environ.get("TOOL_MIN_ACTIVITIES", "2"))
+
+    # Model used for tool-activity mapping suggestions (separate from gap-finding model)
+    MAPPING_MODEL = os.environ.get("MAPPING_MODEL", os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"))
+
 
 class TestingConfig(Config):
     TESTING = True

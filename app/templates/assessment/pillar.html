@@ -122,7 +122,7 @@
     </noscript>
 
     <div class="action-row" style="justify-content:flex-end;">
-      <a href="{{ url_for('assessment.workspace', assessment_id=assessment.id) }}" class="btn btn-outline">Back to Overview</a>
+      <a href="{{ url_for('assessment.workspace', assessment_id=assessment.id, overview=1) }}" class="btn btn-outline">Back to Overview</a>
     </div>
     {% endif %}
   </main>

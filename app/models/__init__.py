@@ -7,8 +7,12 @@ from .gap_finding import GapFinding
 from .sensitive_term import SensitiveTerm
 from .audit_log import AuditLog
 from .ai_call_log import AICallLog
+from .tool_activity_mapping import ToolActivityMapping
+from .mapping_suggestions_log import MappingSuggestionsLog
+from .mapping_change import MappingChange
 
 __all__ = [
     "Assessment", "User", "ToolInventory", "Response",
     "AdminScore", "GapFinding", "SensitiveTerm", "AuditLog", "AICallLog",
+    "ToolActivityMapping", "MappingSuggestionsLog", "MappingChange",
 ]

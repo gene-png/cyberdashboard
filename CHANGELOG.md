@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-04-29
+
+### Added
+- **AI tool-to-activity mapping** (spec §7.1 / ADR-001): Admin can trigger Claude to suggest which framework activities a tool covers, review suggestions with confidence badges and rationale, and finalize mappings — `ToolActivityMapping`, `MappingSuggestionsLog`, `MappingChange` models; `mapping_suggester` service; `GET/POST /admin/.../mapping`, `.../suggest`, `.../finalize` routes; pillar-grouped checkbox UI
+- Tool mapping inventory column: "Mapping" column on inventory page shows "Review Mapping" (pending) or "✓ Mapped (N)" (active) for admin
+- **Gap Register**: added Priority (1–4 from severity) and Related Tools (pipe-separated active-mapping tool names) columns
+- **Executive Summary Top 5**: always-present "Top 5 Priority Gaps" callout block on Executive Summary sheet (shows "No priority gaps" when none exist)
+- **Tool Inventory Mapping sheet**: lists all tools with mapping status and mapped activity names; Redundancy panel (activities with ≥ `REDUNDANCY_THRESHOLD` tools); Underutilization panel (active tools with < `TOOL_MIN_ACTIVITIES` confirmed mappings)
+- **Customer sensitive terms**: textarea on workspace overview page lets customers add scrub terms (source=`user_added`) while assessment is editable; `POST /assessments/{id}/terms` route
+- **Workspace resume**: workspace route redirects to `assessment.current_step` on load; `?overview=1` bypasses redirect; "Back to Overview" links updated
+- **AI generation progress overlay**: JS loading overlay with elapsed-seconds counter on Generate/Regenerate buttons in findings page
+- **SharePoint README.txt**: `README.txt` with folder structure guide uploaded alongside other finalization artifacts in `upload_assessment_outputs()`
+- `.env.example`: added `REDUNDANCY_THRESHOLD`, `TOOL_MIN_ACTIVITIES`, `MAPPING_MODEL` documentation
+- `docs/decisions/adr-tool-mapping-ai.md`: ADR for tool mapping approach selection
+- 39 new tests (test_phase6, test_tool_mapping) — 186 total passing
+
+### Changed
+- Excel "Tool Inventory" sheet renamed to "Tool Inventory Mapping" (includes redundancy/underutilization analysis)
+
 ## [0.5.0] — 2026-04-29
 
 ### Added

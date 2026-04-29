@@ -50,7 +50,7 @@ def test_customer_excel_has_expected_sheets(app, full_assessment):
     wb = load_workbook(io.BytesIO(data))
     assert "Executive Summary" in wb.sheetnames
     assert "Gap Register" in wb.sheetnames
-    assert "Tool Inventory" in wb.sheetnames
+    assert "Tool Inventory Mapping" in wb.sheetnames
     assert "Methodology" in wb.sheetnames
 
 
@@ -82,10 +82,11 @@ def test_tool_inventory_sheet(app, full_assessment):
     with app.app_context():
         data = build_customer_excel(full_assessment)
     wb = load_workbook(io.BytesIO(data))
-    ws = wb["Tool Inventory"]
-    rows = list(ws.iter_rows(min_row=2, values_only=True))
-    names = [r[0] for r in rows]
-    assert "Splunk" in names
+    ws = wb["Tool Inventory Mapping"]
+    all_text = " ".join(
+        str(cell.value) for row in ws.iter_rows() for cell in row if cell.value
+    )
+    assert "Splunk" in all_text
 
 
 def test_consultant_excel_has_extra_sheets(app, full_assessment):
