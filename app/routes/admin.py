@@ -1,12 +1,14 @@
 import io
+import json
 from datetime import datetime, timezone
-from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, send_file
+from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, send_file, current_app
 from flask_login import login_required, current_user
-from ..extensions import db
-from ..models import Assessment, AdminScore, AuditLog, GapFinding
+from ..extensions import db, limiter
+from ..models import Assessment, AdminScore, AuditLog, GapFinding, AICallLog
 from ..services.framework_loader import load_framework
 from ..services.excel_service import build_customer_excel, build_consultant_excel
 from ..services.report_generator import generate_findings, regenerate_finding
+from ..services.sharepoint_service import get_client_from_config, upload_assessment_outputs
 from .auth import is_admin_unlocked
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -129,8 +131,11 @@ def finalize(assessment_id):
     assessment = db.session.get(Assessment, assessment_id)
     if not assessment:
         abort(404)
+
+    now = datetime.now(timezone.utc)
     assessment.status = "finalized"
-    assessment.finalized_at = datetime.now(timezone.utc)
+    assessment.finalized_at = now
+
     log = AuditLog(
         assessment_id=assessment_id,
         user_id=current_user.id,
@@ -140,7 +145,70 @@ def finalize(assessment_id):
     )
     db.session.add(log)
     db.session.commit()
-    flash("Assessment finalized.", "success")
+
+    # Build Excel files
+    customer_xlsx = build_customer_excel(assessment)
+    consultant_xlsx = build_consultant_excel(assessment)
+
+    # Build response snapshot JSON
+    responses_snapshot = [
+        {
+            "activity_id": r.activity_id,
+            "pillar": r.pillar,
+            "current_state_value": r.current_state_value,
+            "target_state_value": r.target_state_value,
+            "evidence_notes": r.evidence_notes,
+        }
+        for r in assessment.responses
+    ]
+
+    # Build audit CSV rows
+    ai_log_rows = [
+        {
+            "timestamp": str(l.timestamp),
+            "model": l.model,
+            "tokens_in": l.tokens_in,
+            "tokens_out": l.tokens_out,
+            "duration_ms": l.duration_ms,
+            "request_body_scrubbed": l.request_body_scrubbed or "",
+            "response_body_scrubbed": l.response_body_scrubbed or "",
+        }
+        for l in assessment.ai_call_logs
+    ]
+    audit_rows = [
+        {
+            "timestamp": str(l.timestamp),
+            "user_id": l.user_id or "",
+            "action": l.action,
+            "target_type": l.target_type or "",
+            "target_id": l.target_id or "",
+            "before_value": l.before_value or "",
+            "after_value": l.after_value or "",
+        }
+        for l in assessment.audit_logs
+    ]
+
+    # Upload to SharePoint (no-op if not configured)
+    sp_client = get_client_from_config(current_app.config)
+    if sp_client:
+        try:
+            upload_assessment_outputs(
+                client=sp_client,
+                assessment_id=assessment_id,
+                org_name=assessment.customer_org,
+                finalized_at=now,
+                customer_xlsx=customer_xlsx,
+                consultant_xlsx=consultant_xlsx,
+                responses_json=json.dumps(responses_snapshot, indent=2),
+                ai_call_log_rows=ai_log_rows,
+                audit_log_rows=audit_rows,
+            )
+            flash("Assessment finalized and uploaded to SharePoint.", "success")
+        except Exception as e:
+            flash(f"Assessment finalized but SharePoint upload failed: {e}", "warning")
+    else:
+        flash("Assessment finalized. (SharePoint not configured — download exports manually.)", "success")
+
     return redirect(url_for("admin.review", assessment_id=assessment_id))
 
 
@@ -229,6 +297,7 @@ def generate(assessment_id):
 
 @admin_bp.route("/assessments/<assessment_id>/findings/<activity_id>/regenerate", methods=["POST"])
 @login_required
+@limiter.limit("10 per minute")
 def regenerate(assessment_id, activity_id):
     redir = _require_admin()
     if redir:
