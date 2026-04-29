@@ -6,6 +6,7 @@ from ..extensions import db
 from ..models import Assessment, AdminScore, AuditLog, GapFinding
 from ..services.framework_loader import load_framework
 from ..services.excel_service import build_customer_excel, build_consultant_excel
+from ..services.report_generator import generate_findings, regenerate_finding
 from .auth import is_admin_unlocked
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -164,3 +165,82 @@ def reopen(assessment_id):
     db.session.commit()
     flash("Assessment reopened.", "success")
     return redirect(url_for("admin.review", assessment_id=assessment_id))
+
+
+@admin_bp.route("/assessments/<assessment_id>/findings")
+@login_required
+def findings(assessment_id):
+    redir = _require_admin()
+    if redir:
+        return redir
+    assessment = db.session.get(Assessment, assessment_id)
+    if not assessment:
+        abort(404)
+    framework = load_framework(assessment.framework)
+
+    # Build activity lookup for display names
+    activity_lookup: dict = {}
+    pillar_name_lookup: dict = {}
+    for pillar in framework["pillars"]:
+        for activity in pillar["activities"]:
+            activity_lookup[activity["id"]] = activity
+            pillar_name_lookup[activity["id"]] = pillar["name"]
+
+    gap_findings = (
+        GapFinding.query
+        .filter_by(assessment_id=assessment_id)
+        .order_by(GapFinding.pillar, GapFinding.activity_id)
+        .all()
+    )
+    return render_template(
+        "admin/findings.html",
+        assessment=assessment,
+        framework=framework,
+        gap_findings=gap_findings,
+        activity_lookup=activity_lookup,
+        pillar_name_lookup=pillar_name_lookup,
+        admin_unlocked=True,
+    )
+
+
+@admin_bp.route("/assessments/<assessment_id>/generate", methods=["POST"])
+@login_required
+def generate(assessment_id):
+    redir = _require_admin()
+    if redir:
+        return redir
+    assessment = db.session.get(Assessment, assessment_id)
+    if not assessment:
+        abort(404)
+
+    try:
+        result = generate_findings(assessment_id, triggered_by_user_id=current_user.id)
+        msg = f"AI findings generated: {result['generated']} gaps processed."
+        if result["errors"]:
+            msg += f" {len(result['errors'])} errors — check logs."
+            flash(msg, "warning")
+        else:
+            flash(msg, "success")
+    except Exception as e:
+        flash(f"Generation failed: {e}", "danger")
+
+    return redirect(url_for("admin.findings", assessment_id=assessment_id))
+
+
+@admin_bp.route("/assessments/<assessment_id>/findings/<activity_id>/regenerate", methods=["POST"])
+@login_required
+def regenerate(assessment_id, activity_id):
+    redir = _require_admin()
+    if redir:
+        return redir
+    assessment = db.session.get(Assessment, assessment_id)
+    if not assessment:
+        abort(404)
+
+    try:
+        regenerate_finding(assessment_id, activity_id, triggered_by_user_id=current_user.id)
+        flash(f"Finding for {activity_id} regenerated.", "success")
+    except Exception as e:
+        flash(f"Regeneration failed: {e}", "danger")
+
+    return redirect(url_for("admin.findings", assessment_id=assessment_id))

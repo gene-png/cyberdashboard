@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-04-29
+
+### Added
+- Privacy scrub pipeline (scrub_service.py): Layer 1 token map (org name + variants, usernames, user-defined terms), Layer 2 regex (IPv4, IPv6, MAC, FQDN, email), Layer 3 rehydration with unknown-token warning
+- `seed_token_map()`: idempotent seeding of sensitive_term table on assessment creation/generation
+- Prompt injection defense in `ai_service.py`: strips instruction-override patterns from evidence notes and tool notes before they enter the AI prompt
+- `build_prompt()`: full spec §6.1 prompt structure (framework, pillar, activity, intent, current/target state, evidence, tools, 4-part task)
+- `call_anthropic()`: Anthropic API client with model, token counts, and duration logging
+- `generate_findings()`: orchestrates all gaps → scrub → AI → store serially; marks no-gap findings stale; logs to ai_call_log and audit_log
+- `regenerate_finding()`: per-finding regeneration, updates existing row in place
+- Severity formula: gap_size × pillar_weight × 100 → critical/high/medium/low
+- Placeholder AI response when ANTHROPIC_API_KEY is not set (enables testing without credentials)
+- Admin "AI Findings" page with finding cards, stale indicators, per-finding Regenerate button
+- "Generate AI Findings" button in admin review and findings views
+- 50 new tests (test_scrub_service, test_ai_service, test_report_generator) — 77 total passing
+
 ## [0.1.0] — 2026-04-29
 
 ### Added
