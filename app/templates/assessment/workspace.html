@@ -22,6 +22,12 @@
          class="sidebar-link {% if request.endpoint == 'assessment.submit' %}active{% endif %}">
         Submit for Review
       </a>
+      {% if assessment.status == 'finalized' %}
+      <a href="{{ url_for('assessment.final_report', assessment_id=assessment.id) }}"
+         class="sidebar-link sidebar-link-highlight">
+        Final Report (Download)
+      </a>
+      {% endif %}
     </nav>
     {% if admin_unlocked %}
     <div class="sidebar-admin">

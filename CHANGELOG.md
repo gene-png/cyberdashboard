@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-04-29
+
+### Added
+- spaCy NER scrub (Layer 2b, spec §6.2): ORG/PERSON/GPE entities not in token map are auto-assigned fresh tokens and persisted to `sensitive_term`; graceful-degrade when model unavailable; regex pass now runs before NER to prevent false-positive matches on hex/IP/MAC content
+- Customer final report download: `GET /assessments/{id}/report` serves the customer Excel after finalization; "Final Report (Download)" link appears in workspace sidebar on finalized assessments
+- Session cookie hardening: `SESSION_COOKIE_SECURE=True`, `SESSION_COOKIE_HTTPONLY=True`, `SESSION_COOKIE_SAMESITE="Lax"` in production config
+- HTTPS force-redirect: `before_request` hook redirects `X-Forwarded-Proto: http` → HTTPS (Azure App Service); controlled by `FORCE_HTTPS=true` env var
+- Structured logging: `logging.basicConfig` configured in app factory (INFO in production, DEBUG in dev/test)
+- `scripts/create_admin.py`: CLI tool that generates a bcrypt hash for `ADMIN_PASSWORD_HASH`
+- `.env.example`: documents all required environment variables with descriptions
+- `.github/workflows/ci.yml`: runs pytest on every push and PR
+- `.github/workflows/deploy.yml`: deploys to Azure App Service on semver tag push
+- `requirements.txt`: added `spacy>=3.7,<4.0` and `en_core_web_sm` model wheel
+- 17 new tests (test_phase5) — 147 total passing
+
 ## [0.4.0] — 2026-04-29
 
 ### Added
