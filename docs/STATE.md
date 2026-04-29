@@ -40,6 +40,15 @@
 - .env.example: REDUNDANCY_THRESHOLD, TOOL_MIN_ACTIVITIES, MAPPING_MODEL
 - 186 tests passing
 
+### Phase 7 (v0.7.0)
+- AI-powered MITRE ATT&CK Coverage Report (feat/attack-coverage-report)
+- 3 new models: MitreTechnique, AttackCoverageRun, CoverageReport
+- 2 new services: attack_mapper (LLM + fingerprint cache), attack_coverage_excel (5-sheet workbook)
+- 3 new admin routes: view page, generate POST, download
+- scripts/seed_mitre.py for one-time ATT&CK technique data loading
+- ATTACK_MODEL + REPORTS_DIR config keys
+- ~50 new tests across 3 test files
+
 ## In Progress
 - Nothing
 

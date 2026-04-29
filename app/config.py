@@ -45,6 +45,13 @@ class Config:
     # Model used for tool-activity mapping suggestions (separate from gap-finding model)
     MAPPING_MODEL = os.environ.get("MAPPING_MODEL", os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"))
 
+    # ATT&CK coverage report model (defaults to ANTHROPIC_MODEL)
+    ATTACK_MODEL = os.environ.get("ATTACK_MODEL", os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"))
+
+    # Directory where generated ATT&CK coverage Excel reports are stored
+    # Defaults to instance/reports/ (gitignored, not served as static)
+    REPORTS_DIR = os.environ.get("REPORTS_DIR", os.path.join(REPO_ROOT, "instance", "reports"))
+
 
 class TestingConfig(Config):
     TESTING = True
@@ -54,3 +61,5 @@ class TestingConfig(Config):
     RATELIMIT_ENABLED = False
     SESSION_COOKIE_SECURE = False  # allow http in tests
     FORCE_HTTPS = False
+    import tempfile
+    REPORTS_DIR = os.path.join(tempfile.gettempdir(), "zt_test_reports")

@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-04-29
+
+### Added
+- **AI-powered MITRE ATT&CK Coverage Report** (`feat/attack-coverage-report`): Admin can generate a 5-sheet Excel workbook mapping every finalized tool to ATT&CK Enterprise techniques (detect/prevent/respond) with gap classification (Full / Detect Only / Prevent Only / Single Tool / None)
+- 3 new models: `MitreTechnique` (ATT&CK technique catalogue), `AttackCoverageRun` (per-tool LLM result cache), `CoverageReport` (generated report metadata + file path)
+- 2 new services: `attack_mapper` (LLM prompt construction, JSON parsing, fingerprint cache logic, gap classification) and `attack_coverage_excel` (5-sheet openpyxl workbook builder)
+- 3 new admin routes: `GET /admin/assessments/<id>/attack-coverage` (view page), `POST .../generate` (trigger generation), `GET .../download` (file download)
+- 5-sheet Excel output: Summary (stats + top 10 gaps), Coverage Matrix (all techniques), Gaps (non-Full entries), Tool Coverage (per-tool stats), Methodology (audit narrative)
+- Fingerprint-based caching: SHA-256 hash of tool metadata + activity IDs skips LLM call when nothing has changed since last run
+- `scripts/seed_mitre.py`: downloads MITRE ATT&CK Enterprise STIX bundle and upserts `mitre_technique` table; supports `--file` for local JSON and `--dry-run`
+- `ATTACK_MODEL` and `REPORTS_DIR` config keys added to `Config` and `TestingConfig`
+- ATT&CK Coverage Report link added to Tool Inventory page admin section
+- `docs/plans/attack-coverage-report.md` and `docs/decisions/adr-attack-coverage.md`
+- 3 new test files (test_attack_mapper, test_attack_coverage_excel, test_attack_coverage_routes) — ~50 new tests
+
 ## [0.6.0] — 2026-04-29
 
 ### Added
