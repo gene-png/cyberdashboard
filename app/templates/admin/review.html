@@ -10,6 +10,8 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <button type="submit" class="btn btn-sm btn-outline">Generate AI Findings</button>
     </form>
+    <a href="{{ url_for('admin.sensitive_terms', assessment_id=assessment.id) }}" class="btn btn-sm btn-outline">Sensitive Terms</a>
+    <a href="{{ url_for('admin.audit_log', assessment_id=assessment.id) }}" class="btn btn-sm btn-outline">Audit Log</a>
     <a href="{{ url_for('admin.export_customer', assessment_id=assessment.id) }}" class="btn btn-sm">Export Customer Report</a>
     <a href="{{ url_for('admin.export_consultant', assessment_id=assessment.id) }}" class="btn btn-sm">Export Consultant Report</a>
     {% if assessment.status != 'finalized' %}
