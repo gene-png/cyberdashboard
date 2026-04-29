@@ -1,11 +1,11 @@
 """
 Privacy scrub pipeline — three layers per spec §6.2.
 
-Layer 1: Per-assessment token map (DB-backed SensitiveTerm table).
-Layer 2: Regex pass — IPv4, IPv6, MAC addresses, FQDNs, email addresses.
-Layer 3: Inbound rehydrate — reverse the token map, warn on unknown tokens.
-
-spaCy NER (Layer 2b) is deferred to Phase 5.
+Layer 1:  Per-assessment token map (DB-backed SensitiveTerm table).
+Layer 2a: Regex pass — IPv4, IPv6, MAC addresses, FQDNs, email addresses.
+          Run first so structured patterns are tokenised before NER sees them.
+Layer 2b: spaCy NER pass — ORG/PERSON/GPE entities not already in token map.
+Layer 3:  Inbound rehydrate — reverse the token map, warn on unknown tokens.
 """
 import re
 import logging
@@ -15,6 +15,28 @@ from ..extensions import db
 from ..models import SensitiveTerm
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# spaCy NER — lazy-loaded, graceful-degrade if unavailable
+# ---------------------------------------------------------------------------
+_nlp = None
+_nlp_loaded = False
+
+def _get_nlp():
+    global _nlp, _nlp_loaded
+    if _nlp_loaded:
+        return _nlp
+    _nlp_loaded = True
+    try:
+        import spacy
+        _nlp = spacy.load("en_core_web_sm")
+    except Exception as exc:
+        logger.warning("spaCy NER unavailable — skipping NER scrub layer: %s", exc)
+        _nlp = None
+    return _nlp
+
+# NER entity labels to scrub
+_NER_LABELS = {"ORG", "PERSON", "GPE"}
 
 # ---------------------------------------------------------------------------
 # Vendor/product allowlist — these pass through unscrubbed.
@@ -155,13 +177,16 @@ def scrub(assessment_id: str, text: str) -> str:
     for st in terms_sorted:
         text = _case_insensitive_replace(text, st.term, st.replacement_token)
 
-    # Layer 2 — regex patterns (order matters: email before FQDN to avoid
-    # the @ being swallowed as part of a hostname match)
+    # Layer 2a — regex patterns run first so IPs/MACs/FQDNs are already
+    # tokenized before NER sees them (avoids false-positive NER matches on hex)
     text, _ = _apply_regex_scrub(text, _RE_EMAIL, _EMAIL_PREFIX)
     text, _ = _apply_regex_scrub(text, _RE_IPV4, _IP_PREFIX)
     text, _ = _apply_regex_scrub(text, _RE_IPV6, _IPV6_PREFIX)
     text, _ = _apply_regex_scrub(text, _RE_MAC, _MAC_PREFIX)
     text, _ = _apply_regex_scrub(text, _RE_FQDN, _HOST_PREFIX)
+
+    # Layer 2b — NER pass (spaCy): catch ORG/PERSON/GPE not yet in token map
+    text = _ner_scrub(assessment_id, text)
 
     return text
 
@@ -205,6 +230,72 @@ def get_token_map(assessment_id: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _ner_scrub(assessment_id: str, text: str) -> str:
+    """
+    Layer 2a: Run spaCy NER on *text*. Any ORG/PERSON/GPE entity not already
+    covered by the token map gets a fresh PERSON/ORG token and is persisted to
+    sensitive_term so rehydration works later.
+
+    Skips silently if spaCy is not available.
+    """
+    nlp = _get_nlp()
+    if nlp is None:
+        return text
+
+    # Build a set of lowercased terms already in the token map to avoid
+    # creating duplicate tokens for the same text.
+    existing_lower = {
+        st.term.lower()
+        for st in SensitiveTerm.query.filter_by(assessment_id=assessment_id, is_active=True).all()
+    }
+    existing_replacements = [
+        st.replacement_token
+        for st in SensitiveTerm.query.filter_by(assessment_id=assessment_id, is_active=True).all()
+    ]
+
+    doc = nlp(text)
+    # Process entities right-to-left so character offsets remain valid
+    # as we do string substitution.
+    new_terms: list[tuple[str, str]] = []  # (original_text, token)
+    seen_ents: set[str] = set()
+
+    for ent in reversed(doc.ents):
+        if ent.label_ not in _NER_LABELS:
+            continue
+        ent_lower = ent.text.strip().lower()
+        if not ent_lower or ent_lower in existing_lower or ent_lower in seen_ents:
+            continue
+        # Skip vendor allowlist terms
+        if any(vendor in ent_lower for vendor in VENDOR_ALLOWLIST):
+            continue
+
+        prefix = "PERSON" if ent.label_ == "PERSON" else "ORG"
+        n = _next_token_num(existing_replacements, prefix)
+        token = f"[{prefix}_{n}]"
+
+        # Persist to DB so rehydration can reverse it
+        st = SensitiveTerm(
+            assessment_id=assessment_id,
+            term=ent.text.strip(),
+            replacement_token=token,
+            source="auto",
+            is_active=True,
+        )
+        db.session.add(st)
+        existing_replacements.append(token)
+        existing_lower.add(ent_lower)
+        seen_ents.add(ent_lower)
+        new_terms.append((ent.text, token))
+
+    if new_terms:
+        db.session.commit()
+        # Apply substitutions
+        for original, token in new_terms:
+            text = _case_insensitive_replace(text, original, token)
+
+    return text
+
 
 def _case_insensitive_replace(text: str, find: str, replace: str) -> str:
     """

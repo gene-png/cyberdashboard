@@ -1,10 +1,12 @@
+import io
 import bleach
 from datetime import datetime, timezone
-from flask import Blueprint, render_template, redirect, url_for, request, flash, abort
+from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, send_file
 from flask_login import login_required, current_user
 from ..extensions import db
 from ..models import Assessment, Response, ToolInventory, AuditLog, GapFinding
 from ..services.framework_loader import load_framework
+from ..services.excel_service import build_customer_excel
 from .auth import is_admin_unlocked
 
 assessment_bp = Blueprint("assessment", __name__)
@@ -197,4 +199,24 @@ def submit(assessment_id):
         total_activities=total_activities,
         answered=answered,
         admin_unlocked=is_admin_unlocked(),
+    )
+
+
+@assessment_bp.route("/assessments/<assessment_id>/report")
+@login_required
+def final_report(assessment_id):
+    """Customer-accessible download of their Excel report after finalization."""
+    assessment = _get_assessment_or_403(assessment_id)
+    if assessment.status != "finalized":
+        flash("The final report is only available after the assessment has been finalized.", "warning")
+        return redirect(url_for("assessment.workspace", assessment_id=assessment_id))
+
+    xlsx_bytes = build_customer_excel(assessment)
+    date_str = (assessment.finalized_at or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+    filename = f"{assessment.customer_org.replace(' ', '_')}_{date_str}_report.xlsx"
+    return send_file(
+        io.BytesIO(xlsx_bytes),
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )

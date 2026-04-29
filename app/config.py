@@ -16,6 +16,11 @@ class Config:
     WTF_CSRF_ENABLED = True
     WTF_CSRF_TIME_LIMIT = 3600
 
+    # Session cookie hardening (spec §11)
+    SESSION_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = "Lax"
+
     ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
     ADMIN_SESSION_TIMEOUT = 15 * 60  # 15 minutes
 
@@ -30,6 +35,9 @@ class Config:
 
     FRAMEWORKS_DIR = os.path.join(REPO_ROOT, "data", "frameworks")
 
+    # Set to True to force HTTP → HTTPS redirect (via X-Forwarded-Proto header)
+    FORCE_HTTPS = os.environ.get("FORCE_HTTPS", "false").lower() == "true"
+
 
 class TestingConfig(Config):
     TESTING = True
@@ -37,3 +45,5 @@ class TestingConfig(Config):
     WTF_CSRF_ENABLED = False
     SECRET_KEY = "test-secret"
     RATELIMIT_ENABLED = False
+    SESSION_COOKIE_SECURE = False  # allow http in tests
+    FORCE_HTTPS = False
