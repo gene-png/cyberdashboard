@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}ZT Assessment Dashboard{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <a href="{{ url_for('dashboard.index') }}">ZT Assessment Dashboard</a>
+    </div>
+    <div class="navbar-links">
+      {% if current_user.is_authenticated %}
+        <span class="nav-user">{{ current_user.username }}</span>
+        {% if admin_unlocked is defined and admin_unlocked %}
+          <span class="badge badge-admin">Admin</span>
+        {% else %}
+          <a href="{{ url_for('auth.admin_unlock') }}" class="btn btn-sm btn-outline">Unlock Admin</a>
+        {% endif %}
+        <a href="{{ url_for('auth.logout') }}" class="btn btn-sm">Logout</a>
+      {% endif %}
+    </div>
+  </nav>
+
+  <div class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-messages">
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>
