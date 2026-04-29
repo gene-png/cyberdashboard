@@ -5,11 +5,15 @@ from flask import Blueprint, render_template, redirect, url_for, request, flash,
 from flask_login import login_required, current_user
 import bleach
 from ..extensions import db, limiter
-from ..models import Assessment, AdminScore, AuditLog, GapFinding, AICallLog, SensitiveTerm, User
+from ..models import (
+    Assessment, AdminScore, AuditLog, GapFinding, AICallLog, SensitiveTerm, User,
+    ToolInventory, ToolActivityMapping, MappingSuggestionsLog, MappingChange,
+)
 from ..services.framework_loader import load_framework
 from ..services.excel_service import build_customer_excel, build_consultant_excel
 from ..services.report_generator import generate_findings, regenerate_finding
 from ..services.sharepoint_service import get_client_from_config, upload_assessment_outputs
+from ..services.mapping_suggester import suggest_mappings, build_mapping_prompt
 from .auth import is_admin_unlocked
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -419,3 +423,207 @@ def sensitive_terms(assessment_id):
         terms=terms,
         admin_unlocked=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Tool Activity Mapping
+# ---------------------------------------------------------------------------
+
+@admin_bp.route("/assessments/<assessment_id>/inventory/<tool_id>/mapping")
+@login_required
+def tool_mapping(assessment_id, tool_id):
+    redir = _require_admin()
+    if redir:
+        return redir
+    assessment = db.session.get(Assessment, assessment_id)
+    if not assessment:
+        abort(404)
+    tool = db.session.get(ToolInventory, tool_id)
+    if not tool or tool.assessment_id != assessment_id:
+        abort(404)
+
+    framework = load_framework(assessment.framework)
+
+    # Build dict of existing mappings: activity_id → ToolActivityMapping
+    existing_mappings = {m.activity_id: m for m in tool.activity_mappings}
+
+    # Build dict of AI suggestions (only ai_suggested rows)
+    ai_suggestions = {
+        m.activity_id: m for m in tool.activity_mappings if m.source == "ai_suggested"
+    }
+    # Confirmed/admin-added also exist after finalization
+    confirmed_ids = {
+        m.activity_id for m in tool.activity_mappings
+        if m.source in ("admin_confirmed", "admin_added")
+    }
+
+    ai_count = len(ai_suggestions)
+    mapped_count = len(confirmed_ids)
+
+    return render_template(
+        "admin/tool_mapping.html",
+        assessment=assessment,
+        tool=tool,
+        framework=framework,
+        existing_mappings=existing_mappings,
+        ai_suggestions=ai_suggestions,
+        confirmed_ids=confirmed_ids,
+        ai_count=ai_count,
+        mapped_count=mapped_count,
+        admin_unlocked=True,
+    )
+
+
+@admin_bp.route("/assessments/<assessment_id>/inventory/<tool_id>/mapping/suggest", methods=["POST"])
+@login_required
+def tool_mapping_suggest(assessment_id, tool_id):
+    redir = _require_admin()
+    if redir:
+        return redir
+    assessment = db.session.get(Assessment, assessment_id)
+    if not assessment:
+        abort(404)
+    tool = db.session.get(ToolInventory, tool_id)
+    if not tool or tool.assessment_id != assessment_id:
+        abort(404)
+
+    framework = load_framework(assessment.framework)
+    api_key = current_app.config.get("ANTHROPIC_API_KEY", "")
+    model = current_app.config.get("MAPPING_MODEL", "claude-sonnet-4-6")
+
+    result = suggest_mappings(tool, framework, api_key, model)
+
+    # suggest_mappings returns (suggestions, error) or (suggestions, None, prompt, raw, model)
+    if len(result) == 2:
+        suggestions, error = result
+        prompt_text, raw_response, used_model = "", "", model
+    else:
+        suggestions, error, prompt_text, raw_response, used_model = result
+
+    # Log the call regardless of success
+    log_entry = MappingSuggestionsLog(
+        tool_id=tool.id,
+        assessment_id=assessment_id,
+        request_payload=prompt_text[:10000] if prompt_text else "",
+        response_payload=raw_response[:10000] if raw_response else (error or ""),
+        model_used=used_model,
+    )
+    db.session.add(log_entry)
+
+    if error:
+        flash(f"AI suggestions unavailable — map manually. ({error})", "warning")
+    else:
+        # Replace existing ai_suggested mappings for this tool
+        ToolActivityMapping.query.filter_by(tool_id=tool.id, source="ai_suggested").delete()
+
+        for s in suggestions:
+            mapping = ToolActivityMapping(
+                tool_id=tool.id,
+                activity_id=s["activity_id"],
+                source="ai_suggested",
+                ai_confidence=s.get("confidence"),
+                ai_rationale=s.get("rationale"),
+            )
+            db.session.add(mapping)
+
+        flash(f"AI suggested {len(suggestions)} activity mappings. Review and finalize below.", "success")
+
+    db.session.commit()
+    return redirect(url_for("admin.tool_mapping", assessment_id=assessment_id, tool_id=tool_id))
+
+
+@admin_bp.route("/assessments/<assessment_id>/inventory/<tool_id>/mapping/finalize", methods=["POST"])
+@login_required
+def tool_mapping_finalize(assessment_id, tool_id):
+    redir = _require_admin()
+    if redir:
+        return redir
+    assessment = db.session.get(Assessment, assessment_id)
+    if not assessment:
+        abort(404)
+    tool = db.session.get(ToolInventory, tool_id)
+    if not tool or tool.assessment_id != assessment_id:
+        abort(404)
+
+    checked_ids = set(request.form.getlist("activity_ids"))
+    if not checked_ids:
+        flash("Select at least one activity before finalizing.", "warning")
+        return redirect(url_for("admin.tool_mapping", assessment_id=assessment_id, tool_id=tool_id))
+
+    # Capture before-state for audit
+    before_ids = sorted(
+        m.activity_id for m in tool.activity_mappings
+        if m.source in ("admin_confirmed", "admin_added")
+    )
+    already_finalized = tool.mapping_status == "active"
+
+    # Get the AI-suggested set for source classification
+    ai_suggested_ids = {
+        m.activity_id for m in tool.activity_mappings if m.source == "ai_suggested"
+    }
+
+    # Replace all non-ai_suggested mappings
+    ToolActivityMapping.query.filter(
+        ToolActivityMapping.tool_id == tool.id,
+        ToolActivityMapping.source.in_(["admin_confirmed", "admin_added"]),
+    ).delete(synchronize_session=False)
+
+    # Also remove ai_suggested rows so we replace them with confirmed/added
+    ToolActivityMapping.query.filter_by(tool_id=tool.id, source="ai_suggested").delete(
+        synchronize_session=False
+    )
+
+    # Get AI rationales from existing suggestion log for confirmed activities
+    latest_log = (
+        MappingSuggestionsLog.query
+        .filter_by(tool_id=tool.id)
+        .order_by(MappingSuggestionsLog.created_at.desc())
+        .first()
+    )
+    ai_rationale_map: dict[str, str] = {}
+    if latest_log and latest_log.response_payload:
+        try:
+            items = json.loads(latest_log.response_payload)
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict) and "activity_id" in item:
+                        ai_rationale_map[item["activity_id"]] = item.get("rationale", "")
+        except (json.JSONDecodeError, Exception):
+            pass
+
+    # Also build confidence map from existing ai_suggested rows (still in session)
+    ai_conf_map: dict[str, str] = {}
+    for m in tool.activity_mappings:
+        if m.source == "ai_suggested" and m.ai_confidence:
+            ai_conf_map[m.activity_id] = m.ai_confidence
+
+    for aid in checked_ids:
+        source = "admin_confirmed" if aid in ai_suggested_ids else "admin_added"
+        mapping = ToolActivityMapping(
+            tool_id=tool.id,
+            activity_id=aid,
+            source=source,
+            ai_confidence=ai_conf_map.get(aid) if source == "admin_confirmed" else None,
+            ai_rationale=ai_rationale_map.get(aid) if source == "admin_confirmed" else None,
+        )
+        db.session.add(mapping)
+
+    now = datetime.now(timezone.utc)
+    tool.mapping_status = "active"
+    tool.mappings_finalized_at = now
+    tool.mappings_finalized_by = current_user.id
+
+    # Audit trail for post-finalization edits
+    if already_finalized:
+        change = MappingChange(
+            tool_id=tool.id,
+            assessment_id=assessment_id,
+            user_id=current_user.id,
+            before_state=json.dumps(before_ids),
+            after_state=json.dumps(sorted(checked_ids)),
+        )
+        db.session.add(change)
+
+    db.session.commit()
+    flash(f"Mappings finalized. {len(checked_ids)} activities mapped for {tool.name}.", "success")
+    return redirect(url_for("admin.tool_mapping", assessment_id=assessment_id, tool_id=tool_id))

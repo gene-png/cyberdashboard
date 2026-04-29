@@ -141,7 +141,7 @@ def test_ensure_folder_skips_existing():
 
 # ---- upload_assessment_outputs ----
 
-def test_upload_assessment_outputs_calls_upload_five_times():
+def test_upload_assessment_outputs_calls_upload_six_times():
     client = _client_with_token()
 
     with patch.object(client, "ensure_folder"), \
@@ -158,10 +158,11 @@ def test_upload_assessment_outputs_calls_upload_five_times():
             audit_log_rows=[{"col": "val"}],
         )
 
-    # 5 uploads: snapshot, customer xlsx, consultant xlsx, ai_call_log csv, audit_log csv
-    assert mock_upload.call_count == 5
+    # 6 uploads: README, snapshot, customer xlsx, consultant xlsx, ai_call_log csv, audit_log csv
+    assert mock_upload.call_count == 6
     assert "customer_report" in result
     assert "consultant_report" in result
+    assert "readme" in result
 
 
 # ---- backup_database ----

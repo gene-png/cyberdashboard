@@ -1,7 +1,7 @@
 # Project State
 
 **Last updated:** 2026-04-29
-**Branch:** main (Phase 5 merged at v0.5.0)
+**Branch:** main (Phase 6 merged at v0.6.0)
 
 ## Done
 
@@ -28,6 +28,18 @@
 - .github/workflows/ci.yml + deploy.yml: CI + Azure App Service CD
 - 147 tests passing
 
+### Phase 6 (v0.6.0)
+- AI tool-to-activity mapping: suggest_mappings() calls Claude, admin reviews, finalizes; 3 new models + service + 3 routes
+- Gap Register: Priority + Related Tools columns
+- Executive Summary Top 5 Priority Gaps callout (always present)
+- Tool Inventory Mapping Excel sheet with redundancy/underutilization panels
+- Customer sensitive terms textarea on workspace overview page
+- Workspace resume to current_step (pillar redirect); ?overview=1 bypasses
+- AI generation progress overlay (JS, findings page)
+- SharePoint README.txt upload alongside other artifacts
+- .env.example: REDUNDANCY_THRESHOLD, TOOL_MIN_ACTIVITIES, MAPPING_MODEL
+- 186 tests passing
+
 ## In Progress
 - Nothing
 
@@ -40,6 +52,7 @@
 - Per-assessment customer user deduplication (spec §13)
 - Engagement Hours sheet in consultant Excel (spec §7.2, optional)
 - Scale to Postgres if assessment volume grows past single-user SQLite limits
+- Tool mapping: underutilization/redundancy alerts surfaced in admin review page (currently only in Excel)
 
 ## Known Issues / Tech Debt
 - Admin route `_require_admin()` returns redirect — should be a decorator

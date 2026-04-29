@@ -8,7 +8,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 from .framework_loader import load_framework
-from ..models import Assessment, Response, AdminScore, GapFinding, ToolInventory, AICallLog, AuditLog
+from ..models import Assessment, Response, AdminScore, GapFinding, ToolInventory, AICallLog, AuditLog, ToolActivityMapping
 
 
 # Color palette
@@ -91,10 +91,29 @@ def _compute_pillar_stats(assessment: Assessment, framework: dict) -> list[dict]
     return stats
 
 
+_SEVERITY_PRIORITY = {"critical": 1, "high": 2, "medium": 3, "low": 4}
+
+
+def _build_activity_to_tools_map(assessment: Assessment) -> dict[str, list[str]]:
+    """Return {activity_id: [tool_name, ...]} for all active tool mappings."""
+    result: dict[str, list[str]] = {}
+    for tool in assessment.tool_inventory:
+        if tool.mapping_status != "active":
+            continue
+        for m in tool.activity_mappings:
+            if m.source in ("admin_confirmed", "admin_added"):
+                result.setdefault(m.activity_id, []).append(tool.name)
+    return result
+
+
 def build_customer_excel(assessment: Assessment) -> bytes:
     framework = load_framework(assessment.framework)
     maturity_order = framework["maturity_order"]
     wb = Workbook()
+
+    responses_by_activity = {r.activity_id: r for r in assessment.responses}
+    findings_by_activity = {f.activity_id: f for f in assessment.gap_findings}
+    activity_to_tools = _build_activity_to_tools_map(assessment)
 
     # ---- Sheet 1: Executive Summary ----
     ws = wb.active
@@ -144,9 +163,42 @@ def build_customer_excel(assessment: Assessment) -> bytes:
         for col in range(2, 8):
             ws.cell(row=data_row, column=col).alignment = Alignment(horizontal="center")
 
+    # ---- Top 5 Priority Gaps callout ----
+    all_gaps = sorted(
+        [f for f in assessment.gap_findings if f.severity],
+        key=lambda f: _SEVERITY_PRIORITY.get(f.severity, 99),
+    )[:5]
+    ws.append([])
+    callout_row = ws.max_row + 1
+    ws.append(["Top 5 Priority Gaps"])
+    ws.cell(row=callout_row, column=1).font = Font(bold=True, size=12, color=DARK_BLUE)
+    if all_gaps:
+        ws.append(["Pillar", "Activity", "Gap Status"])
+        for col in range(1, 4):
+            cell = ws.cell(row=callout_row + 1, column=col)
+            cell.font = Font(bold=True, color=WHITE)
+            cell.fill = PatternFill("solid", fgColor=DARK_BLUE)
+        for f in all_gaps:
+            pillar_name = next(
+                (p["name"] for p in framework["pillars"]
+                 for a in p["activities"] if a["id"] == f.activity_id),
+                f.pillar,
+            )
+            activity_name = next(
+                (a["name"] for p in framework["pillars"]
+                 for a in p["activities"] if a["id"] == f.activity_id),
+                f.activity_id,
+            )
+            ws.append([pillar_name, activity_name, f.severity.title()])
+    else:
+        ws.append(["No priority gaps identified yet."])
+
     # ---- Sheet 2: Gap Register ----
     ws2 = wb.create_sheet("Gap Register")
-    gap_headers = ["Pillar", "Activity ID", "Activity", "Current State", "Target State", "Severity", "AI Remediation Guidance"]
+    gap_headers = [
+        "Pillar", "Activity ID", "Activity", "Current State", "Target State",
+        "Gap Status", "Priority", "AI Remediation Guidance", "Related Tools",
+    ]
     ws2.append(gap_headers)
     for col, h in enumerate(gap_headers, 1):
         cell = ws2.cell(row=1, column=col)
@@ -155,14 +207,13 @@ def build_customer_excel(assessment: Assessment) -> bytes:
 
     ws2.column_dimensions["A"].width = 20
     ws2.column_dimensions["B"].width = 22
-    ws2.column_dimensions["C"].width = 40
+    ws2.column_dimensions["C"].width = 38
     ws2.column_dimensions["D"].width = 14
     ws2.column_dimensions["E"].width = 14
-    ws2.column_dimensions["F"].width = 10
-    ws2.column_dimensions["G"].width = 60
-
-    responses_by_activity = {r.activity_id: r for r in assessment.responses}
-    findings_by_activity = {f.activity_id: f for f in assessment.gap_findings}
+    ws2.column_dimensions["F"].width = 12
+    ws2.column_dimensions["G"].width = 10
+    ws2.column_dimensions["H"].width = 55
+    ws2.column_dimensions["I"].width = 30
 
     for pillar in framework["pillars"]:
         for activity in pillar["activities"]:
@@ -174,19 +225,24 @@ def build_customer_excel(assessment: Assessment) -> bytes:
             if maturity_order.get(resp.current_state_value, 0) >= maturity_order.get(resp.target_state_value, 0):
                 continue
             finding = findings_by_activity.get(activity["id"])
+            severity = finding.severity if finding and finding.severity else None
+            priority = _SEVERITY_PRIORITY.get(severity, "") if severity else ""
             guidance = finding.rehydrated_response if finding and finding.rehydrated_response else "Pending AI analysis"
+            tools_str = " | ".join(activity_to_tools.get(activity["id"], [])) or "—"
             row = [
                 pillar["name"],
                 activity["id"],
                 activity["name"],
                 framework["maturity_labels"].get(resp.current_state_value, resp.current_state_value),
                 framework["maturity_labels"].get(resp.target_state_value, resp.target_state_value),
-                finding.severity.title() if finding and finding.severity else "—",
+                severity.title() if severity else "—",
+                priority,
                 guidance,
+                tools_str,
             ]
             ws2.append(row)
             last_row = ws2.max_row
-            ws2.cell(row=last_row, column=7).alignment = Alignment(wrap_text=True)
+            ws2.cell(row=last_row, column=8).alignment = Alignment(wrap_text=True)
             ws2.row_dimensions[last_row].height = 80
 
     # ---- Per-pillar sheets ----
@@ -224,19 +280,8 @@ def build_customer_excel(assessment: Assessment) -> bytes:
                 wsp.cell(row=last_row, column=col).alignment = Alignment(wrap_text=True)
             wsp.row_dimensions[last_row].height = 60
 
-    # ---- Tool Inventory sheet ----
-    wst = wb.create_sheet("Tool Inventory")
-    wst.append(["Tool Name", "Vendor", "Category", "Notes"])
-    for col in range(1, 5):
-        cell = wst.cell(row=1, column=col)
-        cell.font = Font(bold=True, color=WHITE)
-        cell.fill = PatternFill("solid", fgColor=DARK_BLUE)
-    wst.column_dimensions["A"].width = 30
-    wst.column_dimensions["B"].width = 20
-    wst.column_dimensions["C"].width = 20
-    wst.column_dimensions["D"].width = 40
-    for tool in assessment.tool_inventory:
-        wst.append([tool.name, tool.vendor or "", tool.category or "", tool.notes or ""])
+    # ---- Tool Inventory Mapping sheet ----
+    _build_tool_inventory_mapping_sheet(wb, assessment, framework, activity_to_tools)
 
     # ---- Methodology sheet ----
     wsm = wb.create_sheet("Methodology")
@@ -255,6 +300,105 @@ def build_customer_excel(assessment: Assessment) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def _build_tool_inventory_mapping_sheet(
+    wb, assessment: Assessment, framework: dict, activity_to_tools: dict
+) -> None:
+    """Build the Tool Inventory Mapping sheet with activity linkage and analysis panels."""
+    from flask import current_app
+    try:
+        redundancy_threshold = current_app.config.get("REDUNDANCY_THRESHOLD", 3)
+        underutil_min = current_app.config.get("TOOL_MIN_ACTIVITIES", 2)
+    except RuntimeError:
+        redundancy_threshold = 3
+        underutil_min = 2
+
+    active_tools = [t for t in assessment.tool_inventory if t.mapping_status == "active"]
+    all_activities = {
+        a["id"]: a["name"]
+        for p in framework["pillars"]
+        for a in p["activities"]
+    }
+
+    wst = wb.create_sheet("Tool Inventory Mapping")
+
+    # Tool list section
+    _header_style(wst, wst.max_row + 1, 5, "Tool Inventory", bg=DARK_BLUE)
+    wst.append(["Tool Name", "Vendor", "Category", "Mapping Status", "Mapped Activities"])
+    hrow = wst.max_row
+    for col in range(1, 6):
+        cell = wst.cell(row=hrow, column=col)
+        cell.font = Font(bold=True, color=WHITE)
+        cell.fill = PatternFill("solid", fgColor=DARK_BLUE)
+
+    wst.column_dimensions["A"].width = 28
+    wst.column_dimensions["B"].width = 18
+    wst.column_dimensions["C"].width = 16
+    wst.column_dimensions["D"].width = 16
+    wst.column_dimensions["E"].width = 55
+
+    for tool in assessment.tool_inventory:
+        confirmed = [
+            m.activity_id for m in tool.activity_mappings
+            if m.source in ("admin_confirmed", "admin_added")
+        ]
+        activity_names = [all_activities.get(aid, aid) for aid in confirmed]
+        wst.append([
+            tool.name,
+            tool.vendor or "",
+            tool.category or "",
+            tool.mapping_status.replace("_", " ").title(),
+            " | ".join(activity_names) if activity_names else "—",
+        ])
+        last_row = wst.max_row
+        wst.cell(row=last_row, column=5).alignment = Alignment(wrap_text=True)
+        wst.row_dimensions[last_row].height = 40
+
+    # Redundancy analysis
+    wst.append([])
+    _header_style(wst, wst.max_row + 1, 3, f"Redundancy — Activities with {redundancy_threshold}+ Tools", bg=AMBER, fg="00000000")
+    wst.append(["Activity", "Tools Mapped", "Tool Names"])
+    hrow2 = wst.max_row
+    for col in range(1, 4):
+        cell = wst.cell(row=hrow2, column=col)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor=LIGHT_GREY)
+
+    redundant = {
+        aid: tools for aid, tools in activity_to_tools.items()
+        if len(tools) >= redundancy_threshold
+    }
+    for aid, tools in sorted(redundant.items(), key=lambda x: -len(x[1])):
+        wst.append([all_activities.get(aid, aid), len(tools), " | ".join(tools)])
+
+    if not redundant:
+        wst.append(["No redundant coverage detected.", "", ""])
+
+    # Underutilization analysis
+    wst.append([])
+    _header_style(
+        wst, wst.max_row + 1, 3,
+        f"Underutilization — Tools with fewer than {underutil_min} mapped activities",
+        bg=AMBER, fg="00000000",
+    )
+    wst.append(["Tool Name", "Mapped Activities", "Status"])
+    hrow3 = wst.max_row
+    for col in range(1, 4):
+        cell = wst.cell(row=hrow3, column=col)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor=LIGHT_GREY)
+
+    underutil = [
+        t for t in active_tools
+        if len([m for m in t.activity_mappings if m.source in ("admin_confirmed", "admin_added")]) < underutil_min
+    ]
+    for tool in sorted(underutil, key=lambda t: len(t.activity_mappings)):
+        mapped_count = len([m for m in tool.activity_mappings if m.source in ("admin_confirmed", "admin_added")])
+        wst.append([tool.name, mapped_count, "0 mappings — review tool scope" if mapped_count == 0 else f"Only {mapped_count} mapping(s)"])
+
+    if not underutil:
+        wst.append(["All active tools have adequate activity coverage.", "", ""])
 
 
 def build_consultant_excel(assessment: Assessment) -> bytes:

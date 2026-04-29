@@ -66,6 +66,27 @@
           {% endfor %}
         </tbody>
       </table>
+
+      {% if assessment.is_editable_by_customer %}
+      <div class="card" style="margin-top:2rem;padding:1rem 1.5rem;max-width:560px;">
+        <h3 style="margin-bottom:0.25rem;">Sensitive Terms</h3>
+        <p style="color:#64748b;font-size:13px;margin-bottom:0.75rem;">
+          List any names, hostnames, or identifiers you want removed before AI processing.
+          One per line.
+        </p>
+        {% if user_terms %}
+        <ul style="font-size:13px;margin-bottom:0.75rem;padding-left:1.2rem;">
+          {% for t in user_terms %}<li>{{ t.term }} <code style="color:#64748b;">{{ t.replacement_token }}</code></li>{% endfor %}
+        </ul>
+        {% endif %}
+        <form method="POST" action="{{ url_for('assessment.add_sensitive_terms', assessment_id=assessment.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <textarea name="terms" rows="3" placeholder="Acme Corp&#10;db01.internal&#10;10.0.1.0/24"
+                    style="width:100%;font-size:13px;resize:vertical;" maxlength="4000"></textarea>
+          <button type="submit" class="btn btn-sm btn-primary" style="margin-top:0.4rem;">Save Terms</button>
+        </form>
+      </div>
+      {% endif %}
     </div>
   </main>
 </div>
