@@ -1,7 +1,7 @@
 # Project State
 
-**Last updated:** 2026-04-29
-**Branch:** main (Phase 6 merged at v0.6.0)
+**Last updated:** 2026-04-30
+**Branch:** main (Phase 8 merged at v0.8.0)
 
 ## Done
 
@@ -48,6 +48,22 @@
 - scripts/seed_mitre.py for one-time ATT&CK technique data loading
 - ATTACK_MODEL + REPORTS_DIR config keys
 - ~50 new tests across 3 test files
+
+### Phase 8 (v0.8.0)
+- Public landing page with Start / Resume / Admin Login flows
+- Self-registration: name + org + password creates Customer user + Assessment
+- Pillar evidence upload: AI suggests current states from any machine-readable file; defaults to "initial" if nothing uploaded
+- Tool inventory AI import: upload any file, Claude extracts tool name/vendor/category, review UI before saving
+- Downloadable CSV template for tool import
+- Bulk AI tool mapping button with JS progress countdown
+- MITRE ATT&CK auto-seed on startup (no manual step)
+- Sensitive terms auto-populate preview
+- Improved AI remediation guidance (Gap summary / Steps / Leverage tools / Effort estimate)
+- Improved AI gap findings prompt
+- Navigation breadcrumbs throughout
+- Admin session extended to 1 hour
+- Dashboard moved to /dashboard; landing at /
+- 238 tests passing
 
 ## In Progress
 - Nothing

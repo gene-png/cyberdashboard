@@ -5,6 +5,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-04-30
+
+### Added
+- **Public landing page** with three flows: Start New Assessment, Resume Assessment, Admin Login
+- **Self-registration**: customers enter name, org, framework choice, and password — creates User + Assessment in one step
+- **Pillar evidence upload** (any machine-readable file — PDF, docx, xlsx, CSV, txt, images): AI reviews content and suggests current states per activity; defaults to "Initial" when no evidence or notes are provided
+- **Tool inventory AI import**: upload any file type; Claude parses tool name, vendor, and category; review/deselect page before saving
+- **Downloadable CSV template** for tool import at `/assessments/<id>/inventory/import/template`
+- **Bulk AI tool mapping** button on inventory page with JS countdown (estimates 30s per unmapped tool)
+- **MITRE ATT&CK auto-seed**: startup checks if `mitre_technique` table is empty and seeds from static data — no manual `seed_mitre.py` step required
+- **Sensitive terms auto-populate**: all active regex scrub patterns shown in the UI as preview before submit
+- **Navigation breadcrumbs** on workspace, pillar, inventory, admin review, and findings pages
+- `PillarEvidence` model: stores uploaded evidence files and extracted text per pillar per assessment
+- `evidence_service`: text extraction (pypdf, python-docx, openpyxl, chardet), AI state suggestion, default-initial fallback
+- `tool_import_service`: multi-format text extraction, Claude-based tool parsing, CSV fallback, category list
+- `pypdf==5.1.0`, `python-docx==1.1.2`, `chardet==5.2.0` added to requirements
+
+### Changed
+- **Improved AI remediation guidance**: system prompt requires specific technologies, configurations, and processes; prompt structure now uses Gap summary → Steps → Leverage existing tools → Effort estimate
+- **Improved AI gap findings**: prompt rewritten to produce actionable output, not just state labels
+- **Admin session timeout** extended from 15 minutes to 1 hour
+- **Dashboard route** moved from `/` to `/dashboard` (landing page now occupies `/`)
+- **Login page** reduced to admin password-only; customer login moved to `/resume`
+- 238 tests passing
+
 ## [0.7.0] — 2026-04-29
 
 ### Added
