@@ -22,7 +22,7 @@ class Config:
     SESSION_COOKIE_SAMESITE = "Lax"
 
     ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
-    ADMIN_SESSION_TIMEOUT = 15 * 60  # 15 minutes
+    ADMIN_SESSION_TIMEOUT = 60 * 60  # 60 minutes
 
     ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
     ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
@@ -51,6 +51,9 @@ class Config:
     # Directory where generated ATT&CK coverage Excel reports are stored
     # Defaults to instance/reports/ (gitignored, not served as static)
     REPORTS_DIR = os.environ.get("REPORTS_DIR", os.path.join(REPO_ROOT, "instance", "reports"))
+
+    EVIDENCE_UPLOAD_DIR = os.environ.get("EVIDENCE_UPLOAD_DIR", os.path.join(REPO_ROOT, "instance", "evidence"))
+    MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB
 
 
 class TestingConfig(Config):
